@@ -42,14 +42,14 @@ namespace TrueSync {
     {
 #region Private Fields
 
-        private static TSVector2 zeroVector = new TSVector2(0, 0);
-        private static TSVector2 oneVector = new TSVector2(1, 1);
+        private static readonly TSVector2 zeroVector = new TSVector2(0, 0);
+        private static readonly TSVector2 oneVector = new TSVector2(1, 1);
 
-        private static TSVector2 rightVector = new TSVector2(1, 0);
-        private static TSVector2 leftVector = new TSVector2(-1, 0);
+        private static readonly TSVector2 rightVector = new TSVector2(1, 0);
+        private static readonly TSVector2 leftVector = new TSVector2(-1, 0);
 
-        private static TSVector2 upVector = new TSVector2(0, 1);
-        private static TSVector2 downVector = new TSVector2(0, -1);
+        private static readonly TSVector2 upVector = new TSVector2(0, 1);
+        private static readonly TSVector2 downVector = new TSVector2(0, -1);
 
         #endregion Private Fields
 
@@ -230,20 +230,20 @@ namespace TrueSync {
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void Distance(ref TSVector2 value1, ref TSVector2 value2, out FP result)
+        public static void Distance(in TSVector2 value1, in TSVector2 value2, out FP result)
         {
-            DistanceSquared(ref value1, ref value2, out result);
+            DistanceSquared(in value1, in value2, out result);
             result = (FP) FP.Sqrt(result);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FP DistanceSquared(TSVector2 value1, TSVector2 value2)
         {
             FP result;
-            DistanceSquared(ref value1, ref value2, out result);
+            DistanceSquared(in value1, in value2, out result);
             return result;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void DistanceSquared(ref TSVector2 value1, ref TSVector2 value2, out FP result)
+        public static void DistanceSquared(in TSVector2 value1, in TSVector2 value2, out FP result)
         {
             result._serializedValue=MathBurstedFix.DistanceSquared(
                 (value1.x._serializedValue - value2.x._serializedValue), 
@@ -336,7 +336,7 @@ namespace TrueSync {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get {
                 FP result;
-                DistanceSquared(ref this, ref zeroVector, out result);
+                DistanceSquared(in this, in zeroVector, out result);
                 return FP.Sqrt(result);
             }
         }
@@ -348,7 +348,7 @@ namespace TrueSync {
         public FP LengthSquared()
         {
             FP result;
-            DistanceSquared(ref this, ref zeroVector, out result);
+            DistanceSquared(in this, in zeroVector, out result);
             return result;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -455,12 +455,12 @@ namespace TrueSync {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Normalize()
         {
-            Normalize(ref this, out this);
+            Normalize(in this, out this);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static TSVector2 Normalize(TSVector2 value)
         {
-            Normalize(ref value, out value);
+            Normalize(in value, out value);
             return value;
         }
         [IgnoreMember]
@@ -468,16 +468,16 @@ namespace TrueSync {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get {
                 TSVector2 result;
-                TSVector2.Normalize(ref this, out result);
+                TSVector2.Normalize(in this, out result);
 
                 return result;
             }
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void Normalize(ref TSVector2 value, out TSVector2 result)
+        public static void Normalize(in TSVector2 value, out TSVector2 result)
         {
             FP factor;
-            DistanceSquared(ref value, ref zeroVector, out factor);
+            DistanceSquared(in value, in zeroVector, out factor);
             //UnityEngine.Debug.Log("value " + value);
             factor = 1f/(FP) FP.Sqrt(factor);
             result.x = value.x*factor;
