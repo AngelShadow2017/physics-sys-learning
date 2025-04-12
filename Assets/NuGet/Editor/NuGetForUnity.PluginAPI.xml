@@ -80,7 +80,7 @@
                 NugetForUnity will call this method automatically so you can tell it what custom
                 functionalities your plugin is providing.
             </summary>
-            <param name="registry">The registry where extension points can be registered to.</param>
+            <param name="registry">The registry where extension vertices can be registered to.</param>
         </member>
         <member name="T:NugetForUnity.PluginAPI.INugetPluginRegistry">
             <summary>

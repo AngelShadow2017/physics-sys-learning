@@ -7,7 +7,7 @@ namespace Core.Algorithm
     {
         public static Vector2 RotateRad(this Vector2 self, float rad)
         {
-            float cos = Mathf.Cos(rad), sin = Mathf.Cos(rad);
+            float cos = Mathf.Cos(rad), sin = Mathf.Sin(rad);
             return new Vector2(self.x * cos - self.y * sin, self.x * sin + self.y * cos);
         }
         /// <summary>

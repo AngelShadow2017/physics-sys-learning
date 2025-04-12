@@ -880,7 +880,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the X-axis.
+        /// Creates a matrix for rotating vertices around the X-axis.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the X-axis.</param>
         /// <returns>The rotation matrix.</returns>
@@ -916,7 +916,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the X-axis, from a center point.
+        /// Creates a matrix for rotating vertices around the X-axis, from a center point.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the X-axis.</param>
         /// <param name="centerPoint">The center point.</param>
@@ -956,7 +956,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the Y-axis.
+        /// Creates a matrix for rotating vertices around the Y-axis.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the Y-axis.</param>
         /// <returns>The rotation matrix.</returns>
@@ -992,7 +992,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the Y-axis, from a center point.
+        /// Creates a matrix for rotating vertices around the Y-axis, from a center point.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the Y-axis.</param>
         /// <param name="centerPoint">The center point.</param>
@@ -1032,7 +1032,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the Z-axis.
+        /// Creates a matrix for rotating vertices around the Z-axis.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the Z-axis.</param>
         /// <returns>The rotation matrix.</returns>
@@ -1068,7 +1068,7 @@ namespace TrueSync
         }
 
         /// <summary>
-        /// Creates a matrix for rotating points around the Z-axis, from a center point.
+        /// Creates a matrix for rotating vertices around the Z-axis, from a center point.
         /// </summary>
         /// <param name="radians">The amount, in radians, by which to rotate around the Z-axis.</param>
         /// <param name="centerPoint">The center point.</param>
