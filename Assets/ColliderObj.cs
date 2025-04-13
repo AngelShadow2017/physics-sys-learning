@@ -512,7 +512,8 @@ namespace Core.Algorithm
         public override void Destroy()
         {
             CollisionManager.instance.BufferManager.DeleteCollider(collider);
-            movedVertexs.Dispose();
+            if(movedVertexs.IsCreated)
+                movedVertexs.Dispose();
         }
 
         public override TSVector4 GetBoundingBox()
@@ -953,7 +954,7 @@ namespace Core.Algorithm
         public ColliderVertexBuffer BufferManager = new ColliderVertexBuffer();
         public CollisionManager() {
             groupedColliders = new LinkedHashSet<ColliderBase>[groupCnt];
-            for (int i = 0; i < groupCnt; i++) { 
+            for (int i = 0; i < groupCnt; i++) {
                 groupedColliders[i] = new LinkedHashSet<ColliderBase>();
             }
         }

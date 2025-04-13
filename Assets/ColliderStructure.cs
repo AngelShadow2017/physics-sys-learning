@@ -427,7 +427,14 @@ namespace ZeroAs.DOTS.Colliders
     }
     [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
     public class ColliderVertexBuffer:IDisposable{
-        public static NativeArray<TSVector2>.ReadOnly instancedBuffer => CollisionManager.instance.BufferManager.vertices.AsReadOnly();
+        public static NativeArray<TSVector2>.ReadOnly instancedBuffer
+        {
+            get
+            {
+                return CollisionManager.instance.BufferManager.vertices.AsReadOnly();
+            }
+        }
+
         public NativeHashMap<int,ColliderStructure> colliders = new NativeHashMap<int,ColliderStructure>(16,Allocator.Persistent);
         public NativeList<TSVector2> vertices = new NativeList<TSVector2>(Allocator.Persistent);
 
@@ -476,7 +483,8 @@ namespace ZeroAs.DOTS.Colliders
             removedDelta += colli.vertexCount;
             //var realColli = colliders[colli.uniqueID];
             //removedIndexs.Add(realColli.vertexStartIndex,realColli.vertexStartIndex+realColli.vertexCount-1);
-            colliders.Remove(colli.uniqueID);
+            if(colliders.IsCreated)
+                colliders.Remove(colli.uniqueID);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -523,7 +531,7 @@ namespace ZeroAs.DOTS.Colliders
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
-        public static unsafe void CompactVertexBuffers(
+        public static void CompactVertexBuffers(
             ref int removedDelta,ref NativeHashMap<int,ColliderStructure> colliders,
             ref NativeList<TSVector2> vertices
             )
@@ -533,14 +541,19 @@ namespace ZeroAs.DOTS.Colliders
                 throw new NullReferenceException("vertices数组未创建");
             }
             NativeList<TSVector2> newList = new NativeList<TSVector2>(vertices.Length-removedDelta,Allocator.Persistent);
-            var listArrayPointer = vertices.GetUnsafeReadOnlyPtr();
-            var _sizeof_ = UnsafeUtility.SizeOf<TSVector2>();
+            newList.ResizeUninitialized(vertices.Length - removedDelta);
+            //var listArrayPointer = vertices.GetUnsafeReadOnlyPtr();
+            var listArray = vertices.AsReadOnly();
+            var newListArray = newList.AsArray();
+            int newStartIndex = 0;
+            //var _sizeof_ = UnsafeUtility.SizeOf<TSVector2>();
             foreach (var ele in colliders)
             {
                 ref var val = ref ele.Value;
-                var newStartIndex = newList.Length;
-                newList.AddRangeNoResize(((byte*)listArrayPointer+(_sizeof_*val.vertexStartIndex)), val.vertexCount);
+                NativeArray<TSVector2>.Copy(listArray,val.vertexStartIndex,newListArray,newStartIndex,val.vertexCount);
+                //newList.AddRangeNoResize(((byte*)listArrayPointer+(_sizeof_*val.vertexStartIndex)), val.vertexCount);
                 val.vertexStartIndex = newStartIndex;
+                newStartIndex += val.vertexCount;
             }
             vertices.Dispose();
             vertices = newList;
@@ -782,5 +795,10 @@ namespace ZeroAs.DOTS.Colliders
         {
             segments.Dispose();
         }
+    }
+    [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
+    public struct CollisionManagerBurst
+    {
+        
     }
 }

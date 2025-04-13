@@ -17,6 +17,11 @@ namespace DefaultNamespace
             CollisionManager.instance.TraverseAllListener();
         }
 
+        private void LateUpdate()
+        {
+            CollisionManager.instance.BufferManager.CompactVertexBuffers();
+        }
+
         private void OnPostRender()
         {
             CollisionManager.instance.DebugDisplayShape(transform.localToWorldMatrix);
