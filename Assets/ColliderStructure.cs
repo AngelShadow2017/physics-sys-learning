@@ -18,23 +18,16 @@ namespace ZeroAs.DOTS.Colliders
         Polygon,
         DoubleCircle,
     }
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
     [StructLayout(LayoutKind.Sequential)]
     public struct ColliderStructure:IEquatable<ColliderStructure>
     {
-        private static int _globalIDCounter = 0;
+        //从 1 开始，代表uniqueID如果是0就有问题了，因为这代表是从new创建出来的，不支持从new创建
+        private static int _globalIDCounter = 1;
         public byte enabled;
         public ColliderType colliderType;
         public CollisionGroup collisionGroup;
-        public TSVector2 center;
-        #region 圆形，和双头圆形
-            public FP radius;//圆形半径
-        #endregion
-        #region 椭圆形
-            public TSVector2 Axis, SqrAxis;
-            public FP b2Dividea2,rot;
-        #endregion
         #region 多边形
-
         /// <summary>
         /// 目前进行过修改的vertexStartIndex没同步到主线程上！！！
         /// </summary>
@@ -43,6 +36,13 @@ namespace ZeroAs.DOTS.Colliders
         /// 注意，vertexCount不可变
         /// </summary>
         public int vertexCount,uniqueID;//indexInArray若设置为小于0就代表会被删除
+        #endregion
+        #region 圆形，和双头圆形
+            public FP radius;//圆形半径
+        #endregion
+        #region 椭圆形
+            public FP b2Dividea2,rot;
+            public TSVector2 Axis, SqrAxis;
         #endregion
         #region 双头圆形
             public TSVector2 circleCenter1{
@@ -59,25 +59,42 @@ namespace ZeroAs.DOTS.Colliders
             }
         #endregion
 
-
+        public TSVector2 center;
         public static ColliderStructure CreateInstance()
         {
             var t = new ColliderStructure
             {
                 uniqueID = _globalIDCounter++,
                 collisionGroup = CollisionGroup.Default,
-                enabled=0
+                enabled=1
             };
             return t;
         }
+        [BurstCompile, MethodImpl(MethodImplOptions.AggressiveInlining)]
+        static void CheckInvalidNew(in ColliderStructure structure)
+        {
+#if UNITY_EDITOR
+            if (structure.uniqueID==0)
+            {
+                throw new InvalidOperationException("该结构不能从new初始化，请使用CreateInstance函数获取新实例");
+            }
+#endif
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ColliderStructure other)
         {
+            #if UNITY_EDITOR
+            CheckInvalidNew(this);
+            #endif
             return this.uniqueID==other.uniqueID;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override int GetHashCode()
         {
+#if UNITY_EDITOR
+            CheckInvalidNew(this);
+#endif
             return uniqueID;
         }
     }
