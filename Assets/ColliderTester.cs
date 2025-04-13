@@ -70,11 +70,11 @@ namespace DefaultNamespace
             collider.enabled = true;
             if (moveMode == MoveMode.Keyboard)
             {
-                collider.colliGroup = CollisionManager.CollisionGroup.Default;
+                collider.colliGroup = CollisionGroup.Default;
             }
             else
             {
-                collider.colliGroup = CollisionManager.CollisionGroup.Bullet;
+                collider.colliGroup = CollisionGroup.Bullet;
             }
             controller = new CollisionController(collider);
             if (moveMode == MoveMode.Keyboard)
@@ -87,7 +87,7 @@ namespace DefaultNamespace
                 {
                     meshRenderer.material.color=Color.green;
                     Debug.Log("collide exit");
-                },CollisionManager.CollisionGroup.Bullet);
+                },CollisionGroup.Bullet);
             }
         }
 

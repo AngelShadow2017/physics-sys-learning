@@ -11,6 +11,7 @@ using ZeroAs.DOTS.Colliders;
 namespace Core.Algorithm
 {
     public interface ICollideShape {
+        public bool Registered { get; set; }
         public ref ColliderStructure Collider { get; }
         //获取在某个方向上的最远点
         public TSVector2 GetFurthestPoint(in TSVector2 direction);
@@ -20,7 +21,7 @@ namespace Core.Algorithm
         public TSVector2 GetCenter();
         //左上点和右下点！！！
         public TSVector4 GetBoundingBox();
-        public CollisionManager.CollisionGroup colliGroup { get; set; }
+        public CollisionGroup colliGroup { get; set; }
         public bool enabled { get; set; }
         public void DebugDisplayColliderShape(Color color);
 
@@ -35,21 +36,16 @@ namespace Core.Algorithm
     [Serializable]
     public abstract class ColliderBase : ICollideShape
     {
+        public bool Registered { get; set; } = false;
         public ColliderStructure collider;
 
         public ref ColliderStructure Collider => ref collider;
-        protected CollisionManager.CollisionGroup __colli__ = CollisionManager.CollisionGroup.Default;
+        //protected CollisionGroup __colli__ = CollisionGroup.Default;
         protected bool __enabled__  = true;
         public int tag = -1;//用来识别特定的tag
-        public CollisionManager.CollisionGroup colliGroup {
-            get
-            {
-                return __colli__;
-            }
-            set
-            {
-                __colli__ = value;
-            }
+        public CollisionGroup colliGroup {
+            get => collider.collisionGroup;
+            set => collider.collisionGroup = value;//记得sync
         }
         public bool enabled
         {
@@ -62,7 +58,7 @@ namespace Core.Algorithm
                 __enabled__ = value;
             }
         }
-
+        
         static TSVector2 SupportFunc(ColliderBase shape1,ColliderBase shape2,TSVector2 direciton) {
             //Debug.Log("direction: "+direciton+" "+ shape1.GetFurthestPoint(direciton)+" "+shape2.GetFurthestPoint(-direciton));
             return shape1.GetFurthestPoint(direciton) - shape2.GetFurthestPoint(-direciton);
@@ -74,7 +70,8 @@ namespace Core.Algorithm
         public abstract TSVector4 GetBoundingBox();
         public TSVector2 GetFurthestPoint(in TSVector2 direction)
         {
-            GetFurthestPointExtensions.GetFurthestPoint(out var result, collider, direction,ColliderVertexBuffer.instancedBuffer);
+            CheckEssentialValues();
+            GetFurthestPointExtensions.GetFurthestPoint(out var result, collider, direction,ColliderNativeHelper.instancedBuffer);
             return result;
         }
         public abstract void SetRotation(FP rotRad);
@@ -91,7 +88,7 @@ namespace Core.Algorithm
             TSVector2[] Simplex = new TSVector2[3];//单纯形数组，最多只能是3个
             Simplex[0] = SupportFunc(shape1, shape2, direction);
             int simplexLastInd = 1;
-            int interateTimeMax = 100;//最大迭代次数
+            int interateTimeMax = 10;//最大迭代次数
             //#第三步：找到第一个支撑点后，以第一个支撑点为起点指向原点O的方向为新方向d
             direction = -Simplex[0].normalized;
             //#第四步：开始循环，找下一个支撑点
@@ -179,10 +176,36 @@ namespace Core.Algorithm
         {
             return Collider;
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void CheckEssentialValues()
+        {
+            
+#if UNITY_EDITOR
+            if (!Registered)
+            {
+                throw new NotSupportedException("没有把当前物体注册入控制管理器中");
+            }
+            var judg = CollisionManager.instance?.nativeCollisionManager.colliders.IsCreated;
+            if (!judg.HasValue||!judg.Value)
+            {
+                throw new NotSupportedException("控制器单例不存在或buffer已被销毁");
+            }
+#endif
+        }
+
+        /// <summary>
+        /// 设置完属性后必须调用这个函数
+        /// </summary>
+        public virtual void SaveState()
+        {
+            CheckEssentialValues();
+            CollisionManager.instance.nativeCollisionManager.SyncCollider(ref collider);
+        }
 
         public bool CheckCollide(ColliderBase shape2)
         {
-            return CollideExtensions.CheckCollide(this.GetRealCollider(), shape2.GetRealCollider(),ColliderVertexBuffer.instancedBuffer);
+            CheckEssentialValues();
+            return CollideExtensions.CheckCollide(this.GetRealCollider(), shape2.GetRealCollider(),ColliderNativeHelper.instancedBuffer);
         }
 
         public virtual void DebugDisplayColliderShape(Color color) { }
@@ -199,14 +222,13 @@ namespace Core.Algorithm
     [Serializable]
     public class CircleCollider : ColliderBase
     {
-        public CircleCollider(FP R,TSVector2 center,CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public CircleCollider(FP R,TSVector2 center,CollisionGroup group = CollisionGroup.Default)
         {
-            Collider = ColliderStructure.CreateInstance();
-            Collider.colliderType = ColliderType.Circle;
-            Collider.radius = R;
-            Collider.center = center;
-
-            colliGroup = group;
+            collider = ColliderStructure.CreateInstance();
+            collider.colliderType = ColliderType.Circle;
+            collider.radius = R;
+            collider.center = center;
+            collider.collisionGroup = group;
         }
         public override void SetRotation(FP rotRad) { }//没错，圆形没有旋转
         public override void SetCenter(in TSVector2 center)
@@ -276,7 +298,7 @@ namespace Core.Algorithm
             set => _master_ = value;
         }
 
-        public CircleCollider(T master,FP R, TSVector2 center, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default) : base(R, center, group)
+        public CircleCollider(T master,FP R, TSVector2 center, CollisionGroup group = CollisionGroup.Default) : base(R, center, group)
         {
             this._master_ = master;
         }
@@ -288,14 +310,14 @@ namespace Core.Algorithm
         //public FP rot, b2Dividea2;//旋转，长轴方除以短轴方，因为定点数除法……真的太慢了。。。
         //public TSVector2 Axis,SqrAxis;//半长轴和半短轴？其实应该叫水平轴和竖直轴
         //TSVector2 centerPos;
-        public OvalCollider(TSVector2 axis, TSVector2 center,in FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public OvalCollider(TSVector2 axis, TSVector2 center,in FP rotation, CollisionGroup group = CollisionGroup.Default)
         {
             collider = ColliderStructure.CreateInstance();
             collider.colliderType = ColliderType.Oval;
             collider.rot = rotation;
             collider.center = center;
             SetAxis(axis);
-            colliGroup = group;
+            collider.collisionGroup = group;
         }
         public void SetAxis(TSVector2 axis) {
             collider.Axis = axis;
@@ -391,7 +413,7 @@ namespace Core.Algorithm
             set => _master_ = value;
         }
 
-        public OvalCollider(T master, TSVector2 axis, TSVector2 center, FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default) : base(axis, center,rotation, group)
+        public OvalCollider(T master, TSVector2 axis, TSVector2 center, FP rotation, CollisionGroup group = CollisionGroup.Default) : base(axis, center,rotation, group)
         {
             this._master_ = master;
         }
@@ -416,21 +438,27 @@ namespace Core.Algorithm
             }
         }
 
-        public PolygonCollider(TSVector2[] vertex, TSVector2 center, FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public PolygonCollider(TSVector2[] vertex, TSVector2 center, FP rotation, CollisionGroup group = CollisionGroup.Default)
         {
             collider = ColliderStructure.CreateInstance();
             collider.colliderType = ColliderType.Polygon;
             collider.rot = rotation;
             collider.center = center;
+            collider.collisionGroup = group;
+            collider.vertexCount = vertex.Length;
             movedVertexs = new NativeArray<TSVector2>(vertex.Length,Allocator.Persistent,NativeArrayOptions.UninitializedMemory); //边数是不能变的
-            CollisionManager.instance.BufferManager.RegisterCollider(ref collider,vertex.Length);
-            SetRotation(rotation);
-            colliGroup = group;
+            RotateVertexs(false);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override ColliderStructure GetRealCollider()
         {
-            return CollisionManager.instance.BufferManager.colliders[collider.uniqueID];
+            return CollisionManager.instance.nativeCollisionManager.colliders[collider.uniqueID];
+        }
+
+        public sealed override void SaveState()
+        {
+            base.SaveState();
+            CollisionManager.instance.nativeCollisionManager.ModifyCollider(collider,movedVertexs);
         }
 
         public override void SetRotation(FP rotRad)
@@ -447,7 +475,7 @@ namespace Core.Algorithm
         {
             return collider.center;
         }
-        void RotateVertexs()
+        protected void RotateVertexs(bool saveState=true)
         {
             TSVector4 tSVector4 = new TSVector4(FP.MaxValue, FP.MinValue, FP.MinValue, FP.MaxValue);
             for (int i = movedVertexs.Length - 1; i >= 0; --i)
@@ -470,8 +498,11 @@ namespace Core.Algorithm
                     tSVector4.w = movedVertexs[i].y;//最小值，代表下方点
                 }
             }
-            CollisionManager.instance.BufferManager.ModifyCollider(collider,movedVertexs);
             _boundingBox_ = tSVector4;
+            if (saveState)
+            {
+                SaveState();
+            }
         }
         void MoveDeltaPos(TSVector2 pos)
         {
@@ -480,7 +511,7 @@ namespace Core.Algorithm
                 movedVertexs[i] += pos;
             }
             //标注顶点缓冲区的移动
-            CollisionManager.instance.BufferManager.ModifyCollider(collider,movedVertexs);
+            SaveState();
             _boundingBox_.x += pos.x;
             _boundingBox_.y += pos.y;
             _boundingBox_.z += pos.x;
@@ -502,7 +533,7 @@ namespace Core.Algorithm
             }
             if (result != pos)
             {
-                var arr = ColliderVertexBuffer.instancedBuffer.ToArray();
+                var arr = ColliderNativeHelper.instancedBuffer.ToArray();
                 StringBuilder sb = new StringBuilder();
                 sb.AppendJoin(", ", arr);
                 Debug.Log(result+" "+pos+" "+sb);
@@ -511,7 +542,7 @@ namespace Core.Algorithm
         }*/
         public override void Destroy()
         {
-            CollisionManager.instance.BufferManager.DeleteCollider(collider);
+            CollisionManager.instance.nativeCollisionManager.DeleteCollider(collider);
             if(movedVertexs.IsCreated)
                 movedVertexs.Dispose();
         }
@@ -524,7 +555,7 @@ namespace Core.Algorithm
     [Serializable]
     public class BoxCollider : PolygonCollider
     {
-        public BoxCollider(TSVector2 widthHeight,TSVector2 center,FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public BoxCollider(TSVector2 widthHeight,TSVector2 center,FP rotation, CollisionGroup group = CollisionGroup.Default)
         {
             TSVector2 a = widthHeight * 0.5;//左下，左上，右上，右下
             TSVector2 b = new TSVector2(a.x,-a.y);
@@ -534,9 +565,9 @@ namespace Core.Algorithm
             collider.colliderType = ColliderType.Polygon;
             collider.rot = rotation;
             collider.center = center;
-            CollisionManager.instance.BufferManager.RegisterCollider(ref collider,movedVertexs.Length);
-            SetRotation(rotation);
-            colliGroup = group;
+            collider.vertexCount = vertexs.Length;
+            collider.collisionGroup = group;
+            RotateVertexs(false);
         }
         public override void DebugDisplayColliderShape(Color color)
         {
@@ -562,7 +593,7 @@ namespace Core.Algorithm
             set => _master_ = value;
         }
 
-        public BoxCollider(T master, TSVector2 widthHeight, TSVector2 center, FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default) : base(widthHeight, center, rotation, group)
+        public BoxCollider(T master, TSVector2 widthHeight, TSVector2 center, FP rotation, CollisionGroup group = CollisionGroup.Default) : base(widthHeight, center, rotation, group)
         {
             this._master_ = master;
         }
@@ -571,7 +602,7 @@ namespace Core.Algorithm
     [Serializable]
     public class DiamondCollider : PolygonCollider
     {
-        public DiamondCollider(TSVector2 widthHeight, TSVector2 center, FP rotation, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public DiamondCollider(TSVector2 widthHeight, TSVector2 center, FP rotation, CollisionGroup group = CollisionGroup.Default)
         {
             TSVector2 b = new TSVector2(widthHeight.x * 0.5, 0);
             TSVector2 c = new TSVector2(0, widthHeight.y * 0.5);
@@ -581,9 +612,9 @@ namespace Core.Algorithm
             collider.colliderType = ColliderType.Polygon;
             collider.rot = rotation;
             collider.center = center;
-            CollisionManager.instance.BufferManager.RegisterCollider(ref collider,movedVertexs.Length);
-            SetRotation(rotation);
-            colliGroup = group;
+            collider.vertexCount = vertexs.Length;
+            collider.collisionGroup = group;
+            RotateVertexs(false);
         }
 
     }
@@ -591,13 +622,13 @@ namespace Core.Algorithm
 //两个相同的圆中间连线
     public class DoubleCircleCollider : ColliderBase
     {
-        public DoubleCircleCollider(FP R, TSVector2 center1,TSVector2 center2, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default)
+        public DoubleCircleCollider(FP R, TSVector2 center1,TSVector2 center2, CollisionGroup group = CollisionGroup.Default)
         {
             collider = ColliderStructure.CreateInstance();
             collider.colliderType = ColliderType.DoubleCircle;
             collider.radius = R;
+            collider.collisionGroup = group;
             SetCircleCenters(center1,center2);
-            colliGroup = group;
         }
         public override void SetRotation(FP rotRad) { }//没错，圆形没有旋转
         public override void SetCenter(in TSVector2 center)
@@ -753,7 +784,7 @@ namespace Core.Algorithm
             set => _master_ = value;
         }
 
-        public DoubleCircleCollider(T master, FP R, TSVector2 center1,TSVector2 center2, CollisionManager.CollisionGroup group = CollisionManager.CollisionGroup.Default) : base(R, center1,center2, group)
+        public DoubleCircleCollider(T master, FP R, TSVector2 center1,TSVector2 center2, CollisionGroup group = CollisionGroup.Default) : base(R, center1,center2, group)
         {
             this._master_ = master;
         }
@@ -838,7 +869,7 @@ namespace Core.Algorithm
         public void SetColliders(params ColliderBase[] colliders) {
             SetCollidersIEnumerable(colliders);
         }
-        public CollisionController AddListener(bool multiColli,Action<ColliderBase> collideEnter, Action<ColliderBase> collide, Action<ColliderBase> collideLeave, params CollisionManager.CollisionGroup[] collisionGroups)
+        public CollisionController AddListener(bool multiColli,Action<ColliderBase> collideEnter, Action<ColliderBase> collide, Action<ColliderBase> collideLeave, params CollisionGroup[] collisionGroups)
         {
             if (DestroyedChecker()) return this;//销毁后不允许再增加
             foreach (var item in Colliders)
@@ -847,7 +878,7 @@ namespace Core.Algorithm
             }
             return this;
         }
-        public CollisionController AddListener(Action<ColliderBase> collideEnter, Action<ColliderBase> collide, Action<ColliderBase> collideLeave,params CollisionManager.CollisionGroup[] collisionGroups) {
+        public CollisionController AddListener(Action<ColliderBase> collideEnter, Action<ColliderBase> collide, Action<ColliderBase> collideLeave,params CollisionGroup[] collisionGroups) {
             if (DestroyedChecker()) return this;//销毁后不允许再增加
             foreach (var item in Colliders)
             {
@@ -855,10 +886,10 @@ namespace Core.Algorithm
             }
             return this;
         }
-        public CollisionController AddListener(Action<ColliderBase> collide, params CollisionManager.CollisionGroup[] groups) { 
+        public CollisionController AddListener(Action<ColliderBase> collide, params CollisionGroup[] groups) { 
             return AddListener(null,collide,null,groups);
         }
-        public CollisionController AddListener(Action<ColliderBase> collide, bool multiColli=false, params CollisionManager.CollisionGroup[] groups)
+        public CollisionController AddListener(Action<ColliderBase> collide, bool multiColli=false, params CollisionGroup[] groups)
         {
             return AddListener(multiColli ,null, collide, null, groups);
         }
@@ -940,7 +971,7 @@ namespace Core.Algorithm
                     c.Dispose();
                 }
             }
-            BufferManager.Dispose();
+            nativeCollisionManager.Dispose();
         }
         public int groupCnt = Enum.GetValues(typeof(CollisionGroup)).Length;
         public LinkedHashSet<ColliderBase>[] groupedColliders;//这个到时候要改成LinkedHashSet之类的东西。。。
@@ -951,7 +982,7 @@ namespace Core.Algorithm
         public HashSet<ColliderBase> tmpDrawingHasCheckedObjectsInCurFrame = new HashSet<ColliderBase>();//用来debug有哪些物体当前帧被检查碰撞
         //readonly bool multiCollisionOptimize = false;//先关掉多碰撞优化，测试功能
         private Material _shapeMaterial;//测试
-        public ColliderVertexBuffer BufferManager = new ColliderVertexBuffer();
+        public ColliderNativeHelper nativeCollisionManager = new ColliderNativeHelper();
         public CollisionManager() {
             groupedColliders = new LinkedHashSet<ColliderBase>[groupCnt];
             for (int i = 0; i < groupCnt; i++) {
@@ -966,16 +997,7 @@ namespace Core.Algorithm
             public CollisionGroup recieveGroup;
             public bool multiColli = false;
         }
-        public enum CollisionGroup
-        {
-            Default,
-            Hero,
-            HeroBullet,
-            Bullet,
-            Enemy,
-            EnemyCollideBullet,
-            Item
-        }
+
         //方便过后删除掉
         //添加碰撞监听器
         //有多碰撞需求再改吧……反正就改个list现在仅支持碰一个物体
@@ -1080,6 +1102,16 @@ namespace Core.Algorithm
                 groupedColliders[grp].Add(collider);
             }
             colliders.Add(collider);
+            if (collider.collider.colliderType == ColliderType.Polygon)
+            {
+                nativeCollisionManager.RegisterCollider(ref collider.collider,collider.collider.vertexCount);
+            }
+            else
+            {
+                nativeCollisionManager.RegisterCollider(ref collider.collider);
+            }
+            collider.Registered = true;
+            collider.SaveState();
             return this;
         }
         public void RemoveShape(ColliderBase collider) {
@@ -1092,9 +1124,11 @@ namespace Core.Algorithm
                 int grp = (int)collider.colliGroup;
                 groupedColliders[grp].Remove(collider);
             }
+            nativeCollisionManager.DeleteCollider(collider.collider);
+            colliders.Remove(collider);
             //调用销毁清理函数
             collider.Destroy();
-            colliders.Remove(collider);
+            collider.Registered = false;
         }
         public void SetCenter(in TSVector2 Pos,ColliderBase shape)
         {
@@ -1265,7 +1299,18 @@ namespace Core.Algorithm
             GL.PopMatrix();
         }
     }
-/*
+
+    public enum CollisionGroup
+    {
+        Default,
+        Hero,
+        HeroBullet,
+        Bullet,
+        Enemy,
+        EnemyCollideBullet,
+        Item
+    }
+    /*
  def GJK(s1,s2)
 #两个形状s1,s2相交则返回True。所有的向量/点都是三维的，例如（[x,y,0]）
 #第一步：选择一个初始方向，这个初始方向可以是随机选择的，但通常来说是两个形状中心之间的向量，即：

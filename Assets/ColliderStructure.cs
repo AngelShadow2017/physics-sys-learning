@@ -22,8 +22,9 @@ namespace ZeroAs.DOTS.Colliders
     public struct ColliderStructure:IEquatable<ColliderStructure>
     {
         private static int _globalIDCounter = 0;
-
+        
         public ColliderType colliderType;
+        public CollisionGroup collisionGroup;
         public TSVector2 center;
         #region 圆形，和双头圆形
             public FP radius;//圆形半径
@@ -37,7 +38,7 @@ namespace ZeroAs.DOTS.Colliders
         /// <summary>
         /// 目前进行过修改的vertexStartIndex没同步到主线程上！！！
         /// </summary>
-        public int vertexStartIndex;
+        internal int vertexStartIndex;
         /// <summary>
         /// 注意，vertexCount不可变
         /// </summary>
@@ -63,14 +64,20 @@ namespace ZeroAs.DOTS.Colliders
         {
             var t = new ColliderStructure
             {
-                uniqueID = _globalIDCounter++
+                uniqueID = _globalIDCounter++,
+                collisionGroup = CollisionGroup.Default,
             };
             return t;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Equals(ColliderStructure other)
         {
             return this.uniqueID==other.uniqueID;
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override int GetHashCode()
+        {
+            return uniqueID;
         }
     }
     [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
@@ -426,16 +433,16 @@ namespace ZeroAs.DOTS.Colliders
         }
     }
     [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
-    public class ColliderVertexBuffer:IDisposable{
+    public class ColliderNativeHelper:IDisposable{
         public static NativeArray<TSVector2>.ReadOnly instancedBuffer
         {
             get
             {
-                return CollisionManager.instance.BufferManager.vertices.AsReadOnly();
+                return CollisionManager.instance.nativeCollisionManager.vertices.AsReadOnly();
             }
         }
-
-        public NativeHashMap<int,ColliderStructure> colliders = new NativeHashMap<int,ColliderStructure>(16,Allocator.Persistent);
+        
+        public NativeHashMap<int,ColliderStructure> colliders = new NativeHashMap<int,ColliderStructure>(2048,Allocator.Persistent);
         public NativeList<TSVector2> vertices = new NativeList<TSVector2>(Allocator.Persistent);
 
         public int removedDelta = 0;
@@ -456,9 +463,24 @@ namespace ZeroAs.DOTS.Colliders
             vertices.Resize(colli.vertexStartIndex+vertexCount,NativeArrayOptions.UninitializedMemory);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
+        static void RegisterCollider(
+            in NativeHashMap<int,ColliderStructure> colliders,in NativeList<TSVector2> vertices,
+            ref ColliderStructure colli
+        )
+        {
+            colli.vertexCount = 0;
+            colliders.Add(colli.uniqueID,colli);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RegisterCollider(ref ColliderStructure colli,in int vertexCount)
         {
             RegisterCollider(colliders,vertices,ref colli,vertexCount);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void RegisterCollider(ref ColliderStructure colli)
+        {
+            RegisterCollider(colliders,vertices,ref colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -475,6 +497,22 @@ namespace ZeroAs.DOTS.Colliders
         public void ModifyCollider(in ColliderStructure colli, in NativeArray<TSVector2> modify)
         {
             ModifyCollider(ref colliders,ref vertices,in colli,modify);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
+        static void SyncCollider(
+            ref NativeHashMap<int,ColliderStructure> colliders,
+            ref ColliderStructure colli
+        )
+        {
+            var realColli = colliders[colli.uniqueID];
+            colli.vertexStartIndex = realColli.vertexStartIndex;//顶点起始坐标同步，但是请不要在主程序中使用
+            colliders[colli.uniqueID] = colli;
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SyncCollider(ref ColliderStructure colli)
+        {
+            SyncCollider(ref colliders,ref colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -550,6 +588,7 @@ namespace ZeroAs.DOTS.Colliders
             foreach (var ele in colliders)
             {
                 ref var val = ref ele.Value;
+                if(val.vertexCount==0){continue;}
                 NativeArray<TSVector2>.Copy(listArray,val.vertexStartIndex,newListArray,newStartIndex,val.vertexCount);
                 //newList.AddRangeNoResize(((byte*)listArrayPointer+(_sizeof_*val.vertexStartIndex)), val.vertexCount);
                 val.vertexStartIndex = newStartIndex;
@@ -707,7 +746,7 @@ namespace ZeroAs.DOTS.Colliders
             else
             {
                 segments.ResizeUninitialized(len+1);
-                ColliderVertexBuffer.MoveLeft(segments,left+1,len-left-1,-1);
+                ColliderNativeHelper.MoveLeft(segments,left+1,len-left-1,-1);
             }
             segments[left + 1]=new Segment(currentStart, currentEnd);
         }
@@ -749,7 +788,7 @@ namespace ZeroAs.DOTS.Colliders
             else
             {
                 segments.ResizeUninitialized(len+1);
-                ColliderVertexBuffer.MoveLeft(segments,left+1,len-left-1,-1);
+                ColliderNativeHelper.MoveLeft(segments,left+1,len-left-1,-1);
             }
             segments[left + 1]=new Segment(currentStart, currentEnd);
         }

@@ -19,7 +19,7 @@ namespace DefaultNamespace
 
         private void LateUpdate()
         {
-            CollisionManager.instance.BufferManager.CompactVertexBuffers();
+            CollisionManager.instance.nativeCollisionManager.CompactVertexBuffers();
         }
 
         private void OnPostRender()
