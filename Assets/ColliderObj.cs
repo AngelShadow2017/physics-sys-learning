@@ -41,7 +41,6 @@ namespace Core.Algorithm
 
         public ref ColliderStructure Collider => ref collider;
         //protected CollisionGroup __colli__ = CollisionGroup.Default;
-        protected bool __enabled__  = true;
         public int tag = -1;//用来识别特定的tag
         public CollisionGroup colliGroup {
             get => collider.collisionGroup;
@@ -49,13 +48,11 @@ namespace Core.Algorithm
         }
         public bool enabled
         {
-            get
-            {
-                return __enabled__;
-            }
+            get => collider.enabled!=0;
             set
             {
-                __enabled__ = value;
+                collider.enabled = value ? (byte)1 : (byte)0;
+                SaveState();
             }
         }
         
@@ -450,7 +447,7 @@ namespace Core.Algorithm
             RotateVertexs(false);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public override ColliderStructure GetRealCollider()
+        public sealed override ColliderStructure GetRealCollider()
         {
             return CollisionManager.instance.nativeCollisionManager.colliders[collider.uniqueID];
         }

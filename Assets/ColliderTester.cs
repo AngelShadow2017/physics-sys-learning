@@ -67,7 +67,6 @@ namespace DefaultNamespace
                 default:
                     throw new Exception("not initialized");
             }
-            collider.enabled = true;
             if (moveMode == MoveMode.Keyboard)
             {
                 collider.colliGroup = CollisionGroup.Default;
@@ -77,6 +76,7 @@ namespace DefaultNamespace
                 collider.colliGroup = CollisionGroup.Bullet;
             }
             controller = new CollisionController(collider);
+            collider.enabled = true;
             if (moveMode == MoveMode.Keyboard)
             {
                 controller.AddListener(false, (obj) =>

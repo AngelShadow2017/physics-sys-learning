@@ -22,7 +22,7 @@ namespace ZeroAs.DOTS.Colliders
     public struct ColliderStructure:IEquatable<ColliderStructure>
     {
         private static int _globalIDCounter = 0;
-        
+        public byte enabled;
         public ColliderType colliderType;
         public CollisionGroup collisionGroup;
         public TSVector2 center;
@@ -66,6 +66,7 @@ namespace ZeroAs.DOTS.Colliders
             {
                 uniqueID = _globalIDCounter++,
                 collisionGroup = CollisionGroup.Default,
+                enabled=0
             };
             return t;
         }
@@ -445,7 +446,6 @@ namespace ZeroAs.DOTS.Colliders
         public NativeHashMap<int,ColliderStructure> colliders = new NativeHashMap<int,ColliderStructure>(2048,Allocator.Persistent);
         public NativeList<TSVector2> vertices = new NativeList<TSVector2>(Allocator.Persistent);
 
-        public int removedDelta = 0;
         //public SegmentManager removedIndexs = new SegmentManager(Allocator.Persistent);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -469,7 +469,6 @@ namespace ZeroAs.DOTS.Colliders
             ref ColliderStructure colli
         )
         {
-            colli.vertexCount = 0;
             colliders.Add(colli.uniqueID,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -516,9 +515,8 @@ namespace ZeroAs.DOTS.Colliders
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
-        static void DeleteCollider(ref int removedDelta,ref NativeHashMap<int,ColliderStructure> colliders,in ColliderStructure colli)
+        static void DeleteCollider(ref NativeHashMap<int,ColliderStructure> colliders,in ColliderStructure colli)
         {
-            removedDelta += colli.vertexCount;
             //var realColli = colliders[colli.uniqueID];
             //removedIndexs.Add(realColli.vertexStartIndex,realColli.vertexStartIndex+realColli.vertexCount-1);
             if(colliders.IsCreated)
@@ -528,7 +526,7 @@ namespace ZeroAs.DOTS.Colliders
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         public void DeleteCollider(in ColliderStructure colli)
         {
-            DeleteCollider(ref removedDelta,ref colliders,colli);
+            DeleteCollider(ref colliders,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -570,7 +568,7 @@ namespace ZeroAs.DOTS.Colliders
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         public static void CompactVertexBuffers(
-            ref int removedDelta,ref NativeHashMap<int,ColliderStructure> colliders,
+            ref NativeHashMap<int,ColliderStructure> colliders,
             ref NativeList<TSVector2> vertices
             )
         {
@@ -578,8 +576,8 @@ namespace ZeroAs.DOTS.Colliders
             {
                 throw new NullReferenceException("vertices数组未创建");
             }
-            NativeList<TSVector2> newList = new NativeList<TSVector2>(vertices.Length-removedDelta,Allocator.Persistent);
-            newList.ResizeUninitialized(vertices.Length - removedDelta);
+            NativeList<TSVector2> newList = new NativeList<TSVector2>(vertices.Length,Allocator.Persistent);
+            newList.ResizeUninitialized(vertices.Length);
             //var listArrayPointer = vertices.GetUnsafeReadOnlyPtr();
             var listArray = vertices.AsReadOnly();
             var newListArray = newList.AsArray();
@@ -596,7 +594,6 @@ namespace ZeroAs.DOTS.Colliders
             }
             vertices.Dispose();
             vertices = newList;
-            removedDelta = 0;
         }
         /// <summary>
         /// 移除vertexbuffer的洞洞，注意这是个比较消耗性能的操作，并且要在主线程中同步所有的结构体的顶点位置？（提供同步方法，如果需要的话可以同步，貌似目前不需要，只是会throw出错而已）
@@ -605,7 +602,7 @@ namespace ZeroAs.DOTS.Colliders
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         public void CompactVertexBuffers()
         {
-            CompactVertexBuffers(ref removedDelta,ref colliders,ref vertices);
+            CompactVertexBuffers(ref colliders,ref vertices);
         }
 
         public void Dispose()
