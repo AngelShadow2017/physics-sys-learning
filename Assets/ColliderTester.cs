@@ -86,7 +86,7 @@ namespace DefaultNamespace
                 },(obj) =>
                 {
                     //meshRenderer.material.color=Color.red;
-                    Debug.Log(obj.collider.uniqueID);
+                    //Debug.Log(obj.collider.uniqueID);
                 },(obj) =>
                 {
                     meshRenderer.material.color=Color.green;

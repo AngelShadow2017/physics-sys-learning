@@ -1265,7 +1265,7 @@ namespace Core.Algorithm
                     actionList.AddRange(listenerSet);
                 }
                 int actionListCount = actionList.Count;
-                var jobHandles = new NativeList<JobHandle>(actionListCount, Allocator.Temp);
+                var jobHandles = new NativeArray<JobHandle>(actionListCount, Allocator.Temp);
                 var singleResults = new NativeArray<NativeArray<int>>(actionListCount, Allocator.Temp);
                 var multiResults = new NativeArray<NativeQueue<int>>(actionListCount, Allocator.Temp);
                 var nativeColliders = nativeCollisionManager.colliders.AsReadOnly();
@@ -1306,7 +1306,7 @@ namespace Core.Algorithm
 
                             multiResults[i] = queueResult;
                 
-                            jobHandles.Add(waitHandle);
+                            jobHandles[i] = (waitHandle);
                         }
                         else
                         {
@@ -1321,18 +1321,18 @@ namespace Core.Algorithm
                                 vertexBuffer
                             );
                             singleResults[i] = minResults;
-                            jobHandles.Add(waitHandle);
+                            jobHandles[i] = (waitHandle);
                         }
                     }
                 }
                 JobHandle.ScheduleBatchedJobs();
-                JobHandle.CompleteAll(jobHandles.AsArray());
-                jobHandles.Dispose();
-                for (int i = 0; i < actionList.Count; i++)
+                
+                JobHandle.CompleteAll(jobHandles);
+                for (int i = 0; i < actionListCount; i++)
                 {
                     var action = actionList[i];
                     tmpDrawingHasCheckedObjectsInCurFrame.Add(action.collider);
-
+                    //jobHandles[i].Complete();
                     if (action.multiColli)
                     {
                         var tmpRes = multiResults[i];
@@ -1397,6 +1397,7 @@ namespace Core.Algorithm
                 // 清理原生内存
                 singleResults.Dispose();
                 multiResults.Dispose();
+                jobHandles.Dispose();
                 ListPool<__action_checkColli__>.Release(actionList);
             }
             #endregion

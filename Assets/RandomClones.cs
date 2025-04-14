@@ -15,7 +15,7 @@ public class RandomClones : MonoBehaviour
     {
         if (times < 2000)
         {
-            if (Random.value < 0.08f)
+            if (Random.value < 0.1f)
             {
                 GameObject obj2 = Instantiate(obj, transform.position, Quaternion.identity);
                 obj2.transform.position = new Vector3(Random.Range(-15,15), Random.Range(-15,15), 0);
