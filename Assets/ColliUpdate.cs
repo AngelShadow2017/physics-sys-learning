@@ -14,7 +14,14 @@ namespace DefaultNamespace
 
         private void Update()
         {
+            //CollisionManager.instance.ReloadJobCollisionChecker();
             CollisionManager.instance.TraverseAllListener();
+            if (
+                CollisionManager.instance.converterManager.IsCreated)
+            {
+                
+                CollisionManager.instance.converterManager.Dispose();
+            }
         }
 
         private void LateUpdate()

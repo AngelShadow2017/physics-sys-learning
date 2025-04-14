@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Core.Algorithm;
+using JetBrains.Annotations;
 using TrueSync;
 using Unity.Burst;
 using Unity.Collections;
@@ -451,7 +452,12 @@ namespace ZeroAs.DOTS.Colliders
         }
     }
     [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
-    public class ColliderNativeHelper:IDisposable{
+    public class ColliderNativeHelper:IDisposable
+    {
+        private bool disposed = false;
+
+        public bool Disposed => disposed;
+
         public static NativeArray<TSVector2>.ReadOnly instancedBuffer
         {
             get
@@ -461,9 +467,30 @@ namespace ZeroAs.DOTS.Colliders
         }
         
         public NativeHashMap<int,ColliderStructure> colliders = new NativeHashMap<int,ColliderStructure>(2048,Allocator.Persistent);
+        public NativeArray<NativeHashSet<int>> groupedColliders;
         public NativeList<TSVector2> vertices = new NativeList<TSVector2>(Allocator.Persistent);
 
+        void InitGroupedStructs()
+        {
+            groupedColliders = new NativeArray<NativeHashSet<int>>(CollisionManager.groupCnt,Allocator.Persistent);
+            for (int i = 0; i < CollisionManager.groupCnt; i++) {
+                groupedColliders[i] = new NativeHashSet<int>(64,Allocator.Persistent);
+            }
+        }
+
+        public ColliderNativeHelper()
+        {
+            InitGroupedStructs();
+        }
+
         //public SegmentManager removedIndexs = new SegmentManager(Allocator.Persistent);
+        /// <summary>
+        /// 注册Collider到数组里面，如果要调用这个静态函数记得配合RegisterCollisionGroup，必须同时使用
+        /// </summary>
+        /// <param name="colliders"></param>
+        /// <param name="vertices"></param>
+        /// <param name="colli"></param>
+        /// <param name="vertexCount"></param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         static void RegisterCollider(
@@ -479,6 +506,13 @@ namespace ZeroAs.DOTS.Colliders
             //不需要清理内存，因为马上就会被设置
             vertices.Resize(colli.vertexStartIndex+vertexCount,NativeArrayOptions.UninitializedMemory);
         }
+        /// <summary>
+        /// 注册Collider到数组里面，如果要调用这个静态函数记得配合RegisterCollisionGroup，必须同时使用
+        /// </summary>
+        /// <param name="colliders"></param>
+        /// <param name="vertices"></param>
+        /// <param name="colli"></param>
+        /// <param name="vertexCount"></param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         static void RegisterCollider(
@@ -489,14 +523,30 @@ namespace ZeroAs.DOTS.Colliders
             colliders.Add(colli.uniqueID,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
+        static void RegisterCollisionGroup(ref NativeArray<NativeHashSet<int>> collisionGroups,
+            in ColliderStructure colli)
+        {
+            collisionGroups[(int)colli.collisionGroup].Add(colli.uniqueID);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
+        static void DeleteCollisionGroup(ref NativeArray<NativeHashSet<int>> collisionGroups,
+            in ColliderStructure colli)
+        {
+            collisionGroups[(int)colli.collisionGroup].Remove(colli.uniqueID);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RegisterCollider(ref ColliderStructure colli,in int vertexCount)
         {
             RegisterCollider(colliders,vertices,ref colli,vertexCount);
+            RegisterCollisionGroup(ref groupedColliders,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void RegisterCollider(ref ColliderStructure colli)
         {
             RegisterCollider(colliders,vertices,ref colli);
+            RegisterCollisionGroup(ref groupedColliders,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -507,7 +557,7 @@ namespace ZeroAs.DOTS.Colliders
         {
             //获取实际上的colli
             var realColli = colliders[colli.uniqueID];
-            NativeArray<TSVector2>.Copy(modify,0,vertices,realColli.vertexStartIndex,realColli.vertexCount);
+            NativeArray<TSVector2>.Copy(modify,0,vertices.AsArray(),realColli.vertexStartIndex,realColli.vertexCount);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void ModifyCollider(in ColliderStructure colli, in NativeArray<TSVector2> modify)
@@ -530,6 +580,11 @@ namespace ZeroAs.DOTS.Colliders
         {
             SyncCollider(ref colliders,ref colli);
         }
+        /// <summary>
+        /// 从数组里面删除Collider，如果要调用这个静态函数记得配合DeleteCollisionGroup，必须同时使用
+        /// </summary>
+        /// <param name="colliders"></param>
+        /// <param name="colli"></param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
         static void DeleteCollider(ref NativeHashMap<int,ColliderStructure> colliders,in ColliderStructure colli)
@@ -544,6 +599,7 @@ namespace ZeroAs.DOTS.Colliders
         public void DeleteCollider(in ColliderStructure colli)
         {
             DeleteCollider(ref colliders,colli);
+            DeleteCollisionGroup(ref groupedColliders,colli);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = false,OptimizeFor = OptimizeFor.Performance)]
@@ -624,6 +680,7 @@ namespace ZeroAs.DOTS.Colliders
 
         public void Dispose()
         {
+            disposed = true;
             if(vertices.IsCreated)
                 vertices.Dispose();
             //removedIndexs.Dispose();
@@ -632,6 +689,17 @@ namespace ZeroAs.DOTS.Colliders
                 colliders.Dispose();
             }
 
+            if (groupedColliders.IsCreated)
+            {
+                foreach (var collider in groupedColliders)
+                {
+                    if (collider.IsCreated)
+                    {
+                        collider.Dispose();
+                    }
+                }
+                groupedColliders.Dispose();
+            }
         }
         /*[MethodImpl(MethodImplOptions.AggressiveInlining)]
         [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]

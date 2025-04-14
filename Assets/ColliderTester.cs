@@ -82,17 +82,26 @@ namespace DefaultNamespace
                 controller.AddListener(false, (obj) =>
                 {
                     meshRenderer.material.color=Color.red;
-                    Debug.Log("collide enter");
-                },CollisionManager.voidFunction,(obj) =>
+                    Debug.Log("collide enter "+obj.collider.uniqueID);
+                },(obj) =>
+                {
+                    //meshRenderer.material.color=Color.red;
+                    Debug.Log(obj.collider.uniqueID);
+                },(obj) =>
                 {
                     meshRenderer.material.color=Color.green;
-                    Debug.Log("collide exit");
+                    Debug.Log("collide exit ");
                 },CollisionGroup.Bullet);
             }
         }
 
         void Update()
         {
+            /*if (moveMode == MoveMode.Keyboard)
+            {
+                meshRenderer.material.color=Color.green;
+            }*/
+
             if (Input.GetKey(KeyCode.K))
             {
                 currentRotation+=rotationSpeed*Time.deltaTime*Mathf.Deg2Rad;

@@ -44,7 +44,7 @@ public class JobsTesting : MonoBehaviour
         for (int i = 0; i < 500000; i++)
         {
             var o = new someObjects();
-            o.center = math.UnitVector(360*((FP)UnityEngine.Random.value))*(FP)UnityEngine.Random.value*100;
+            o.center = Mathz.UnitVector(360*((FP)UnityEngine.Random.value))*(FP)UnityEngine.Random.value*100;
             objs.Add(o);
         }
     }

@@ -214,7 +214,7 @@ public class KalmanFilterVector3
         k = 0;
     }
 }
-public static class math
+public static class Mathz
 {
     public static readonly FP sqrt2 = FP.Sqrt(2); 
     public static bool checkOut(TSVector2 border, TSVector pos, TSVector2 size)

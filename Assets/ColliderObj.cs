@@ -4,9 +4,11 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using TrueSync;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Pool;
 using ZeroAs.DOTS.Colliders;
+using ZeroAs.DOTS.Colliders.Jobs;
 
 namespace Core.Algorithm
 {
@@ -36,16 +38,35 @@ namespace Core.Algorithm
     [Serializable]
     public abstract class ColliderBase : ICollideShape
     {
+        
+        public int UniqueID
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => collider.uniqueID;
+        }
+
         public bool Registered { get; set; } = false;
         public ColliderStructure collider;
 
         public ref ColliderStructure Collider => ref collider;
         //protected CollisionGroup __colli__ = CollisionGroup.Default;
         public int tag = -1;//用来识别特定的tag
-        public CollisionGroup colliGroup {
+        public CollisionGroup colliGroup
+        {
             get => collider.collisionGroup;
-            set => collider.collisionGroup = value;//记得sync
+            set
+            {
+                #if UNITY_EDITOR
+                if (Registered)
+                {
+                    throw new InvalidOperationException("不支持在注册给了管理器之后再改变Group");
+                }
+                #endif
+                collider.collisionGroup = value;
+            }
+            //记得sync
         }
+
         public bool enabled
         {
             get => collider.enabled!=0;
@@ -539,7 +560,6 @@ namespace Core.Algorithm
         }*/
         public override void Destroy()
         {
-            CollisionManager.instance.nativeCollisionManager.DeleteCollider(collider);
             if(movedVertexs.IsCreated)
                 movedVertexs.Dispose();
         }
@@ -961,7 +981,7 @@ namespace Core.Algorithm
 
         public void Dispose()
         {
-            foreach (var colliderBase in colliders)
+            foreach (var colliderBase in colliders.Values)
             {
                 if (colliderBase is IDisposable c)
                 {
@@ -969,13 +989,20 @@ namespace Core.Algorithm
                 }
             }
             nativeCollisionManager.Dispose();
+            if (converterManager.IsCreated)
+            {
+                converterManager.Dispose();
+            }
         }
-        public int groupCnt = Enum.GetValues(typeof(CollisionGroup)).Length;
+        public static readonly int groupCnt = Enum.GetValues(typeof(CollisionGroup)).Length;
         public LinkedHashSet<ColliderBase>[] groupedColliders;//这个到时候要改成LinkedHashSet之类的东西。。。
-        public HashSet<ColliderBase> colliders = new HashSet<ColliderBase>();
+        public Dictionary<int,ColliderBase> colliders = new();
         public LinkedDictionary<ColliderBase, LinkedPooledHashSet<__action_checkColli__>> listeners = new LinkedDictionary<ColliderBase, LinkedPooledHashSet<__action_checkColli__>>();
         public LinkedDictionary<ColliderBase, LinkedDictionary<CollisionGroup,__action_checkColli__>> receivers = new LinkedDictionary<ColliderBase, LinkedDictionary<CollisionGroup, __action_checkColli__>>();
-
+        /// <summary>
+        /// 每帧末尾记得调用Dispose
+        /// </summary>
+        public CollisionGroupHashSetToArrayManager converterManager;
         public HashSet<ColliderBase> tmpDrawingHasCheckedObjectsInCurFrame = new HashSet<ColliderBase>();//用来debug有哪些物体当前帧被检查碰撞
         //readonly bool multiCollisionOptimize = false;//先关掉多碰撞优化，测试功能
         private Material _shapeMaterial;//测试
@@ -1098,7 +1125,7 @@ namespace Core.Algorithm
                 int grp = (int)collider.colliGroup;
                 groupedColliders[grp].Add(collider);
             }
-            colliders.Add(collider);
+            colliders.Add(collider.UniqueID,collider);
             if (collider.collider.colliderType == ColliderType.Polygon)
             {
                 nativeCollisionManager.RegisterCollider(ref collider.collider,collider.collider.vertexCount);
@@ -1121,8 +1148,11 @@ namespace Core.Algorithm
                 int grp = (int)collider.colliGroup;
                 groupedColliders[grp].Remove(collider);
             }
-            nativeCollisionManager.DeleteCollider(collider.collider);
-            colliders.Remove(collider);
+            if (!nativeCollisionManager.Disposed)
+            {
+                nativeCollisionManager.DeleteCollider(collider.collider);
+            }
+            colliders.Remove(collider.UniqueID);
             //调用销毁清理函数
             collider.Destroy();
             collider.Registered = false;
@@ -1130,34 +1160,21 @@ namespace Core.Algorithm
         public void SetCenter(in TSVector2 Pos,ColliderBase shape)
         {
             shape.SetCenter(Pos);
-            /*if (multiCollisionOptimize)
-        {
-            quadTreeOptmize.InsertCollider(shape);
-        }*/
+            
         }
 
-        /*public void SwitchMultiColli(bool swit) {
-        if (multiCollisionOptimize == swit) { return; }
-        if (swit)
+
+        private bool readyToBatchCheckCollision => converterManager.Available;
+
+        public void ReloadJobCollisionChecker()
         {
-            foreach(var i in colliders)
+            if (converterManager.IsCreated)
             {
-                quadTreeOptmize.InsertCollider(i);
+                converterManager.Dispose();
             }
-            foreach (var groupHashSet in groupedColliders) {
-                groupHashSet.Clear();
-            }
+            converterManager = new CollisionGroupHashSetToArrayManager(nativeCollisionManager.groupedColliders.AsReadOnly());
         }
-        else
-        {
-            quadTreeOptmize.ClearAllCollider();
-            foreach(var i in colliders)
-            {
-                AddShape(i);
-            }
-        }
-        multiCollisionOptimize = swit;
-    }*/
+
         public ColliderBase CheckCollision(ColliderBase obj,CollisionGroup group) {
             if (!obj.enabled)
             {
@@ -1203,36 +1220,187 @@ namespace Core.Algorithm
             {
                 tmpDrawingHasCheckedObjectsInCurFrame.Clear();
             }
-            foreach(var kvPair in listeners)
+
+            #region 不适用多线程
+            if (!readyToBatchCheckCollision)
             {
-                var val = kvPair.Value;
-                foreach (var obj in val)
+                foreach(var kvPair in listeners)
                 {
-                    if (!obj.collider.enabled) { continue; }//如果自身不允许碰撞就不碰
-                    foreach (var i in obj.checkGroups)
+                    var val = kvPair.Value;
+                    foreach (var obj in val)
                     {
-                        //多碰撞不支持接收器
-                        if (obj.multiColli)
+                        if (!obj.collider.enabled) { continue; }//如果自身不允许碰撞就不碰
+                        foreach (var i in obj.checkGroups)
                         {
-                            List<ColliderBase> collis = ListPool<ColliderBase>.Get();
-                            CheckCollision(obj.collider, i, ref collis);
-                            foreach(var retObj in collis)
+                            //多碰撞不支持接收器
+                            if (obj.multiColli)
                             {
+                                List<ColliderBase> collis = ListPool<ColliderBase>.Get();
+                                CheckCollision(obj.collider, i, ref collis);
+                                foreach(var retObj in collis)
+                                {
+                                    callActionComponent(retObj, obj);
+                                }
+                                ListPool<ColliderBase>.Release(collis);
+                            }else{
+                                var retObj = CheckCollision(obj.collider, i);
                                 callActionComponent(retObj, obj);
-                            }
-                            ListPool<ColliderBase>.Release(collis);
-                        }else{
-                            var retObj = CheckCollision(obj.collider, i);
-                            callActionComponent(retObj, obj);
-                            //如果对方有接收器
-                            if (retObj != null && receivers.ContainsKey(retObj) && receivers[retObj].ContainsKey(obj.collider.colliGroup))
-                            {
-                                callActionComponent(obj.collider, receivers[retObj][obj.collider.colliGroup]);
+                                //如果对方有接收器
+                                if (retObj != null && receivers.ContainsKey(retObj) && receivers[retObj].ContainsKey(obj.collider.colliGroup))
+                                {
+                                    callActionComponent(obj.collider, receivers[retObj][obj.collider.colliGroup]);
+                                }
                             }
                         }
                     }
                 }
             }
+            #endregion
+            #region 适用多线程
+            else
+            {
+                var actionList = ListPool<__action_checkColli__>.Get();
+                foreach (var listenerSet in listeners.Values)
+                {
+                    actionList.AddRange(listenerSet);
+                }
+                int actionListCount = actionList.Count;
+                var jobHandles = new NativeList<JobHandle>(actionListCount, Allocator.Temp);
+                var singleResults = new NativeArray<NativeArray<int>>(actionListCount, Allocator.Temp);
+                var multiResults = new NativeArray<NativeQueue<int>>(actionListCount, Allocator.Temp);
+                var nativeColliders = nativeCollisionManager.colliders.AsReadOnly();
+                var vertexBuffer = nativeCollisionManager.vertices.AsReadOnly();
+                for (int i = 0; i < actionListCount; i++)
+                {
+                    var action = actionList[i];
+                    if (!action.collider.enabled)
+                    {
+                        continue;
+                    }
+#if UNITY_EDITOR
+                    if (!nativeColliders.TryGetValue(action.collider.UniqueID, out var targetCollider))
+                    {
+                        throw new NullReferenceException("无法在本地数组里面找到collider");
+                    }
+#endif
+                    //使用指定的collider，但是一定要保证在数组里面
+                    targetCollider = action.collider.GetRealCollider();
+
+                    // 对每个检测组进行处理
+                    foreach (var group in action.checkGroups)
+                    {
+                        int groupIndex = (int)group;
+            
+                        if (action.multiColli)
+                        {
+                            // 多碰撞检测
+                            CollisionChecker.FindAllCollidingIds(
+                                out var queueResult,
+                                out var waitHandle,
+                                ref converterManager,
+                                groupIndex,
+                                targetCollider,
+                                nativeColliders,
+                                vertexBuffer
+                                );
+
+                            multiResults[i] = queueResult;
+                
+                            jobHandles.Add(waitHandle);
+                        }
+                        else
+                        {
+                            // 单碰撞检测
+                            CollisionChecker.FindMinCollidingId(
+                                out var minResults,
+                                out var waitHandle,
+                                ref converterManager,
+                                groupIndex,
+                                targetCollider,
+                                nativeColliders,
+                                vertexBuffer
+                            );
+                            singleResults[i] = minResults;
+                            jobHandles.Add(waitHandle);
+                        }
+                    }
+                }
+                JobHandle.ScheduleBatchedJobs();
+                JobHandle.CompleteAll(jobHandles.AsArray());
+                jobHandles.Dispose();
+                for (int i = 0; i < actionList.Count; i++)
+                {
+                    var action = actionList[i];
+                    tmpDrawingHasCheckedObjectsInCurFrame.Add(action.collider);
+
+                    if (action.multiColli)
+                    {
+                        var tmpRes = multiResults[i];
+                        // 处理多碰撞结果
+                        if (tmpRes.Count>0)
+                        {
+                            //这里是排完序的，不用在意它不统一
+                            CollisionChecker.PostProcessAllResults(
+                                out var res,
+                                ref tmpRes);
+                            foreach (var colliderId in res)
+                            {
+                                if (colliders.TryGetValue(colliderId, out var collided))
+                                {
+                                    callActionComponent(collided, action);
+                                    // 处理接收器回调
+                                    //多碰撞无接收器
+                                    /*if (receivers.TryGetValue(collided, out var receiverGroups) &&
+                                        receiverGroups.TryGetValue(action.collider.colliGroup, out var receiverAction))
+                                    {
+                                        callActionComponent(action.collider, receiverAction);
+                                    }*/
+                                }
+                            }
+                        }
+
+                        /*if (multiResults[i].IsCreated)
+                        {
+                            multiResults[i].Dispose();
+                        }*/
+                    }
+                    else
+                    {
+                        var tmpRes = singleResults[i];
+                        int result = CollisionChecker.PostProcessMinResults(ref tmpRes);
+                        // 处理单碰撞
+                        if(result!=int.MaxValue){//如果是最大就代表没有碰上任何物体
+                            if (colliders.TryGetValue(result, out var collided))
+                            {
+                                callActionComponent(collided, action);
+                                // 处理接收器回调
+                                if (receivers.TryGetValue(collided, out var receiverGroups) &&
+                                    receiverGroups.TryGetValue(action.collider.colliGroup, out var receiverAction))
+                                {
+                                    callActionComponent(action.collider, receiverAction);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            callActionComponent(null, action);
+                        }
+
+                        /*if (singleResults[i].IsCreated)
+                        {
+                            singleResults[i].Dispose();
+                        }*/
+                    }
+                }
+
+
+                // 清理原生内存
+                singleResults.Dispose();
+                multiResults.Dispose();
+                ListPool<__action_checkColli__>.Release(actionList);
+            }
+            #endregion
+            
         }
         void callActionComponent(ColliderBase beCollidedObj,__action_checkColli__ action) {
             if (beCollidedObj != null)
@@ -1277,7 +1445,7 @@ namespace Core.Algorithm
         }
         else*/
             {
-                foreach (var collider in colliders)
+                foreach (var collider in colliders.Values)
                 {
                     if (!collider.enabled || tmpDrawingHasCheckedObjectsInCurFrame.Contains(collider)) { continue; }
                     Color color = Color.HSVToRGB((float)collider.colliGroup / groupCnt, 1, 1);
@@ -1296,16 +1464,16 @@ namespace Core.Algorithm
             GL.PopMatrix();
         }
     }
-
+    
     public enum CollisionGroup
     {
-        Default,
-        Hero,
-        HeroBullet,
-        Bullet,
-        Enemy,
-        EnemyCollideBullet,
-        Item
+        Default = 0,
+        Hero = 1,
+        HeroBullet = 2,
+        Bullet = 3,
+        Enemy = 4,
+        EnemyCollideBullet = 5,
+        Item = 6
     }
     /*
  def GJK(s1,s2)
