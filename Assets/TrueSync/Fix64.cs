@@ -3,6 +3,7 @@ using System.IO;
 using UnityEngine;
 using Unity.Burst;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using MessagePack;
 
 
@@ -55,6 +56,7 @@ namespace TrueSync {
     /// </summary>
     [Serializable]
     [MessagePackObject]
+    [StructLayout(LayoutKind.Sequential)]
     public partial struct FP : IEquatable<FP>, IComparable<FP>
     {
 
