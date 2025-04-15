@@ -38,7 +38,27 @@ namespace Core.Algorithm
     [Serializable]
     public abstract class ColliderBase : ICollideShape
     {
-        
+#if UNITY_EDITOR
+        protected bool _dirty = false;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetDirty(bool dir)
+        {
+            _dirty = dir;
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CheckDirty()
+        {
+            if (_dirty)
+            {
+                throw new MemberAccessException("碰撞体为脏，不能访问，请保存当前状态。");
+            }
+        }
+#else
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetDirty(bool dir){}
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CheckDirty(){}
+#endif
         public int UniqueID
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -46,7 +66,7 @@ namespace Core.Algorithm
         }
 
         public bool Registered { get; set; } = false;
-        public ColliderStructure collider;
+        internal ColliderStructure collider;
 
         public ref ColliderStructure Collider => ref collider;
         //protected CollisionGroup __colli__ = CollisionGroup.Default;
@@ -72,8 +92,8 @@ namespace Core.Algorithm
             get => collider.enabled!=0;
             set
             {
+                SetDirty(true);
                 collider.enabled = value ? (byte)1 : (byte)0;
-                SaveState();
             }
         }
         
@@ -216,6 +236,7 @@ namespace Core.Algorithm
         /// </summary>
         public virtual void SaveState()
         {
+            SetDirty(false);
             CheckEssentialValues();
             CollisionManager.instance.nativeCollisionManager.SyncCollider(ref collider);
         }
@@ -247,10 +268,18 @@ namespace Core.Algorithm
             collider.radius = R;
             collider.center = center;
             collider.collisionGroup = group;
+            SetDirty(true);
         }
-        public override void SetRotation(FP rotRad) { }//没错，圆形没有旋转
-        public override void SetCenter(in TSVector2 center)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetRadius(in FP r)
         {
+            collider.radius = r;
+            SetDirty(true);
+        }
+        public sealed override void SetRotation(FP rotRad) { }//没错，圆形没有旋转
+        public sealed override void SetCenter(in TSVector2 center)
+        {
+            SetDirty(true);
             Collider.center = center;
         }
         public override TSVector2 GetCenter()
@@ -336,6 +365,7 @@ namespace Core.Algorithm
             collider.center = center;
             SetAxis(axis);
             collider.collisionGroup = group;
+            SetDirty(true);
         }
         public void SetAxis(TSVector2 axis) {
             collider.Axis = axis;
@@ -348,13 +378,16 @@ namespace Core.Algorithm
             {
                 collider.b2Dividea2 = collider.SqrAxis.y / collider.SqrAxis.x;
             }
+            SetDirty(true);
         }
         public override void SetRotation(FP rotRad) {
             collider.rot = rotRad;
+            SetDirty(true);
         }//没错，圆形没有旋转
         public override void SetCenter(in TSVector2 center)
         {
             collider.center = center;
+            SetDirty(true);
         }
         public override TSVector2 GetCenter()
         {
@@ -465,12 +498,13 @@ namespace Core.Algorithm
             collider.collisionGroup = group;
             collider.vertexCount = vertex.Length;
             movedVertexs = new NativeArray<TSVector2>(vertex.Length,Allocator.Persistent,NativeArrayOptions.UninitializedMemory); //边数是不能变的
-            RotateVertexs(false);
+            RotateVertexs();
+            SetDirty(true);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public sealed override ColliderStructure GetRealCollider()
         {
-            return CollisionManager.instance.nativeCollisionManager.colliders[collider.uniqueID];
+            return CollisionManager.instance.nativeCollisionManager.GetColliderStructureSafe(this);
         }
 
         public sealed override void SaveState()
@@ -481,6 +515,7 @@ namespace Core.Algorithm
 
         public override void SetRotation(FP rotRad)
         {
+            SetDirty(true);
             collider.rot = rotRad;
             RotateVertexs();
         }//没错，圆形没有旋转
@@ -488,12 +523,13 @@ namespace Core.Algorithm
         {
             MoveDeltaPos(center-collider.center);
             collider.center = center;
+            SetDirty(true);
         }
         public override TSVector2 GetCenter()
         {
             return collider.center;
         }
-        protected void RotateVertexs(bool saveState=true)
+        protected void RotateVertexs()
         {
             TSVector4 tSVector4 = new TSVector4(FP.MaxValue, FP.MinValue, FP.MinValue, FP.MaxValue);
             for (int i = movedVertexs.Length - 1; i >= 0; --i)
@@ -517,10 +553,7 @@ namespace Core.Algorithm
                 }
             }
             _boundingBox_ = tSVector4;
-            if (saveState)
-            {
-                SaveState();
-            }
+            SetDirty(true);
         }
         void MoveDeltaPos(TSVector2 pos)
         {
@@ -529,11 +562,11 @@ namespace Core.Algorithm
                 movedVertexs[i] += pos;
             }
             //标注顶点缓冲区的移动
-            SaveState();
             _boundingBox_.x += pos.x;
             _boundingBox_.y += pos.y;
             _boundingBox_.z += pos.x;
             _boundingBox_.w += pos.y;
+            SetDirty(true);
         }
         /*public override TSVector2 GetFurthestPoint(in TSVector2 _direction)
         {
@@ -584,7 +617,8 @@ namespace Core.Algorithm
             collider.center = center;
             collider.vertexCount = vertexs.Length;
             collider.collisionGroup = group;
-            RotateVertexs(false);
+            RotateVertexs();
+            SetDirty(true);
         }
         public override void DebugDisplayColliderShape(Color color)
         {
@@ -631,7 +665,8 @@ namespace Core.Algorithm
             collider.center = center;
             collider.vertexCount = vertexs.Length;
             collider.collisionGroup = group;
-            RotateVertexs(false);
+            RotateVertexs();
+            SetDirty(true);
         }
 
     }
@@ -646,32 +681,54 @@ namespace Core.Algorithm
             collider.radius = R;
             collider.collisionGroup = group;
             SetCircleCenters(center1,center2);
+            SetDirty(true);
+        }
+
+        public void SetRadius(in FP r)
+        {
+            collider.radius = r;
+            SetDirty(true);
         }
         public override void SetRotation(FP rotRad) { }//没错，圆形没有旋转
-        public override void SetCenter(in TSVector2 center)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public sealed override void SetCenter(in TSVector2 center)
         {
             TSVector2 delta = center - collider.center;
             collider.circleCenter1 += delta;
             collider.circleCenter2 += delta;
             collider.center = center;
+            SetDirty(true);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetCircleCenters(in TSVector2 center1,in TSVector2 center2)
         {
             collider.circleCenter1 = center1;
             collider.circleCenter2 = center2;
             collider.center = (center1 + center2) * 0.5;
+            SetDirty(true);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetCircleCenter2(in TSVector2 center2)
         {
             collider.circleCenter2 = center2;
             collider.center = (collider.circleCenter1 + center2) * 0.5;
+            SetDirty(true);
         }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetCircleCenter1(in TSVector2 center1)
         {
             collider.circleCenter1 = center1;
             collider.center = (collider.circleCenter2 + center1) * 0.5;
+            SetDirty(true);
         }
-        public override TSVector2 GetCenter()
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public TSVector2 GetCircleCenter1(){return collider.circleCenter1;}
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public TSVector2 GetCircleCenter2() { return collider.circleCenter2; }
+
+        public TSVector2 centerCircle1 => collider.circleCenter1;
+        public TSVector2 centerCircle2 => collider.circleCenter2;
+        public sealed override TSVector2 GetCenter()
         {
             return collider.center;
         }
@@ -1135,7 +1192,6 @@ namespace Core.Algorithm
                 nativeCollisionManager.RegisterCollider(ref collider.collider);
             }
             collider.Registered = true;
-            collider.SaveState();
             return this;
         }
         public void RemoveShape(ColliderBase collider) {
@@ -1215,7 +1271,14 @@ namespace Core.Algorithm
                 }
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        void SaveAllStateInOneColliGroup(int group)
+        {
+            foreach (var i in groupedColliders[group])
+            {
+                i.SaveState();
+            }
+        }
         public void TraverseAllListener() {
             {
                 tmpDrawingHasCheckedObjectsInCurFrame.Clear();
@@ -1224,14 +1287,21 @@ namespace Core.Algorithm
             #region 不适用多线程
             if (!readyToBatchCheckCollision)
             {
+                var alreadySavedGroups = new bool[groupCnt];
                 foreach(var kvPair in listeners)
                 {
                     var val = kvPair.Value;
                     foreach (var obj in val)
                     {
                         if (!obj.collider.enabled) { continue; }//如果自身不允许碰撞就不碰
+                        obj.collider.SaveState();
                         foreach (var i in obj.checkGroups)
                         {
+                            if (alreadySavedGroups[(int)i])
+                            {
+                                alreadySavedGroups[(int)i] = true;
+                                SaveAllStateInOneColliGroup((int)i);
+                            }
                             //多碰撞不支持接收器
                             if (obj.multiColli)
                             {
@@ -1265,11 +1335,40 @@ namespace Core.Algorithm
                     actionList.AddRange(listenerSet);
                 }
                 int actionListCount = actionList.Count;
-                var jobHandles = new NativeArray<JobHandle>(actionListCount, Allocator.Temp);
-                var singleResults = new NativeArray<NativeArray<int>>(actionListCount, Allocator.Temp);
-                var multiResults = new NativeArray<NativeQueue<int>>(actionListCount, Allocator.Temp);
+                var alreadySavedGroup = new NativeArray<byte>(groupCnt,Allocator.Temp);
+                var jobHandles = new NativeList<JobHandle>(actionListCount, Allocator.TempJob);
+                var singleResults = new NativeList<
+                    GroupedResultReceiver<
+                        NativeReference<int>
+                    >
+                >(actionListCount, Allocator.TempJob);//每帧？差不多会有n个或者以上
+                var multiResults = new NativeList<
+                    GroupedResultReceiver<
+                        NativeList<int>
+                    >
+                >(actionListCount, Allocator.TempJob);
                 var nativeColliders = nativeCollisionManager.colliders.AsReadOnly();
                 var vertexBuffer = nativeCollisionManager.vertices.AsReadOnly();
+                //这里不能一边创建job一遍同步，不然会出现问题
+                for (int i = 0 ;i<actionListCount;i++) {
+                    var action = actionList[i];
+                    if (!action.collider.enabled)
+                    {
+                        continue;
+                    }
+                    //同步当前状态
+                    action.collider.SaveState();
+                    foreach (var group in action.checkGroups)
+                    {
+                        int groupIndex = (int)group;
+                        if (alreadySavedGroup[groupIndex] == 0)
+                        {
+                            alreadySavedGroup[groupIndex] = 1;
+                            SaveAllStateInOneColliGroup(groupIndex);
+                        }
+                    }
+                }
+
                 for (int i = 0; i < actionListCount; i++)
                 {
                     var action = actionList[i];
@@ -1277,6 +1376,7 @@ namespace Core.Algorithm
                     {
                         continue;
                     }
+                    //同步当前状态
 #if UNITY_EDITOR
                     if (!nativeColliders.TryGetValue(action.collider.UniqueID, out var targetCollider))
                     {
@@ -1290,7 +1390,6 @@ namespace Core.Algorithm
                     foreach (var group in action.checkGroups)
                     {
                         int groupIndex = (int)group;
-            
                         if (action.multiColli)
                         {
                             // 多碰撞检测
@@ -1304,15 +1403,19 @@ namespace Core.Algorithm
                                 vertexBuffer
                                 );
 
-                            multiResults[i] = queueResult;
+                            multiResults.Add(new GroupedResultReceiver<NativeList<int>>()
+                            {
+                                ActionTarget = i,
+                                Container = queueResult
+                            });
                 
-                            jobHandles[i] = (waitHandle);
+                            jobHandles.Add(waitHandle);
                         }
                         else
                         {
                             // 单碰撞检测
                             CollisionChecker.FindMinCollidingId(
-                                out var minResults,
+                                out var minResult,
                                 out var waitHandle,
                                 ref converterManager,
                                 groupIndex,
@@ -1320,85 +1423,84 @@ namespace Core.Algorithm
                                 nativeColliders,
                                 vertexBuffer
                             );
-                            singleResults[i] = minResults;
-                            jobHandles[i] = (waitHandle);
+                            singleResults.Add(new GroupedResultReceiver<NativeReference<int>>()
+                            {
+                                ActionTarget = i,
+                                Container = minResult
+                            });
+                            jobHandles.Add(waitHandle);
                         }
                     }
                 }
+                alreadySavedGroup.Dispose();
                 JobHandle.ScheduleBatchedJobs();
                 
-                JobHandle.CompleteAll(jobHandles);
-                for (int i = 0; i < actionListCount; i++)
+                JobHandle.CompleteAll(jobHandles.AsArray());
+                //处理单碰撞
                 {
-                    var action = actionList[i];
-                    tmpDrawingHasCheckedObjectsInCurFrame.Add(action.collider);
-                    //jobHandles[i].Complete();
-                    if (action.multiColli)
+                    int sigLength = singleResults.Length;
+                    for (int i = 0; i < sigLength; i++)
                     {
-                        var tmpRes = multiResults[i];
-                        // 处理多碰撞结果
-                        if (tmpRes.Count>0)
+                        var targetAction = singleResults[i].ActionTarget;
+                        var singleResult = singleResults[i].Container;
+                        if (singleResult.IsCreated)
                         {
-                            //这里是排完序的，不用在意它不统一
-                            CollisionChecker.PostProcessAllResults(
-                                out var res,
-                                ref tmpRes);
-                            foreach (var colliderId in res)
+                            int result = singleResult.Value;
+                            // 处理单碰撞
+                            if (result != int.MaxValue)
+                            {
+                                //如果是最大就代表没有碰上任何物体
+                                if (colliders.TryGetValue(result, out var collided))
+                                {
+                                    var act = actionList[targetAction];
+                                    callActionComponent(collided, act);
+                                    // 处理接收器回调
+                                    if (receivers.TryGetValue(collided, out var receiverGroups) &&
+                                        receiverGroups.TryGetValue(act.collider.colliGroup, out var receiverAction))
+                                    {
+                                        callActionComponent(act.collider, receiverAction);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                callActionComponent(null, actionList[targetAction]);
+                            }
+                        }
+                        singleResults[i].Dispose();
+                    }
+                }
+                //处理多碰撞
+                {
+                    int sigLength = multiResults.Length;
+                    for (int i = 0; i < sigLength; i++)
+                    {
+                        var targetAction = multiResults[i].ActionTarget;
+                        var arr = multiResults[i].Container;
+                        if (arr.IsCreated)
+                        {
+                            foreach (var colliderId in arr)
                             {
                                 if (colliders.TryGetValue(colliderId, out var collided))
                                 {
-                                    callActionComponent(collided, action);
-                                    // 处理接收器回调
+                                    callActionComponent(collided, actionList[targetAction]);
                                     //多碰撞无接收器
-                                    /*if (receivers.TryGetValue(collided, out var receiverGroups) &&
-                                        receiverGroups.TryGetValue(action.collider.colliGroup, out var receiverAction))
-                                    {
-                                        callActionComponent(action.collider, receiverAction);
-                                    }*/
                                 }
                             }
                         }
-
-                        /*if (multiResults[i].IsCreated)
-                        {
-                            multiResults[i].Dispose();
-                        }*/
-                    }
-                    else
-                    {
-                        var tmpRes = singleResults[i];
-                        int result = CollisionChecker.PostProcessMinResults(ref tmpRes);
-                        // 处理单碰撞
-                        if(result!=int.MaxValue){//如果是最大就代表没有碰上任何物体
-                            if (colliders.TryGetValue(result, out var collided))
-                            {
-                                callActionComponent(collided, action);
-                                // 处理接收器回调
-                                if (receivers.TryGetValue(collided, out var receiverGroups) &&
-                                    receiverGroups.TryGetValue(action.collider.colliGroup, out var receiverAction))
-                                {
-                                    callActionComponent(action.collider, receiverAction);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            callActionComponent(null, action);
-                        }
-
-                        /*if (singleResults[i].IsCreated)
-                        {
-                            singleResults[i].Dispose();
-                        }*/
+                        multiResults[i].Dispose();
                     }
                 }
-
 
                 // 清理原生内存
                 singleResults.Dispose();
                 multiResults.Dispose();
                 jobHandles.Dispose();
                 ListPool<__action_checkColli__>.Release(actionList);
+                if (converterManager.IsCreated)
+                {
+                    converterManager.Dispose();
+                }
             }
             #endregion
             

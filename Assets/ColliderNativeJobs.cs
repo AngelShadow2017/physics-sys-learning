@@ -7,6 +7,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using ZeroAs.DOTS.Colliders;
 
@@ -33,7 +34,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
             get
             {
                 #if UNITY_EDITOR
-                if (_destroyFlag.IsCreated!=convertIsCreateBool)
+                if (convertIsCreateBool&&_destroyFlag.IsCreated!=convertIsCreateBool)
                 {
                     throw new InvalidOperationException("忘记释放CollisionGroupHashSetToArrayManager内存");
                 }
@@ -126,15 +127,27 @@ namespace ZeroAs.DOTS.Colliders.Jobs
         // 清理方法
         public void Dispose()
         {
+            if (_isCreated == 0)
+            {
+                return;
+            }
             _isCreated = 0;
             _collisionGroupInfos.Dispose();
-            _allHandles.Dispose();
-            for (int i = 0; i < _collisionGroupObjs.Length; i++)
+            if (_collisionGroupObjs.IsCreated)
             {
-                _collisionGroupObjs[i].checkGroupArray.Dispose();
+                JobHandle.CompleteAll(_allHandles.AsArray());
+                for (int i = 0; i < _collisionGroupObjs.Length; i++)
+                {
+                    _collisionGroupObjs[i].checkGroupArray.Dispose();
+                }
+                _collisionGroupObjs.Dispose();
             }
-            _collisionGroupObjs.Dispose();
-            if(_destroyFlag.IsCreated) _destroyFlag.Dispose();
+            _allHandles.Dispose();
+            //!!!Temp类型的分配不需要手动销毁
+            /*if (_destroyFlag.IsCreated)
+            {
+                _destroyFlag.Dispose();
+            }*/
             //hashset是在外面控制的
         }
     }
@@ -157,7 +170,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
         /// <param name="allocator"></param>
         [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
         public static void FindMinCollidingId(
-            out NativeArray<int> minResults_ret,
+            out NativeReference<int> minResult_ret,
             out JobHandle waitHandle,
             
             ref CollisionGroupHashSetToArrayManager toArrayManager,
@@ -176,10 +189,10 @@ namespace ZeroAs.DOTS.Colliders.Jobs
             batchCount = (elementCount+batchSize-1) / batchSize;
             var minResults = new NativeArray<int>(
                 batchCount,
-                allocator,
+                Allocator.TempJob,
                 NativeArrayOptions.UninitializedMemory);
 
-            var handles = new NativeList<JobHandle>(batchCount, allocator);
+            var handles = new NativeList<JobHandle>(batchCount, Allocator.Temp);
 
             // 分块调度作业
             for (int i = 0; i < batchCount; i++)
@@ -201,9 +214,10 @@ namespace ZeroAs.DOTS.Colliders.Jobs
                 
                 handles.Add(checkJob.Schedule(toArrayManager._collisionGroupInfos[groupIndex].handle));
             }
-
-            minResults_ret = minResults;
-            waitHandle = JobHandle.CombineDependencies(handles.AsArray());
+            var combine = new CombineMinJob();
+            combine.ele = minResults;
+            minResult_ret = combine.min = new NativeReference<int>(allocator);
+            waitHandle=combine.Schedule(JobHandle.CombineDependencies(handles.AsArray()));
             handles.Dispose();
         }
         /// <summary>
@@ -211,7 +225,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
         /// </summary>
         /// <param name="minResults"></param>
         /// <returns></returns>
-        [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
+        /*[BurstCompile(OptimizeFor = OptimizeFor.Performance)]
         public static int PostProcessMinResults(ref NativeArray<int> minResults)
         {
             // 第三步：收集最终结果
@@ -225,7 +239,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
             }
             minResults.Dispose();
             return finalResult;
-        }
+        }*/
         #endregion
         [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
         static int nextPow2(int n)
@@ -242,7 +256,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
         #region 一对多，并且返回排完序后的数组
         [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
         public static void FindAllCollidingIds(
-            out NativeQueue<int> resultsQueue,
+            out NativeList<int> resultArray,
             out JobHandle waitHandle,
             ref CollisionGroupHashSetToArrayManager toArrayManager,
             in int groupIndex,
@@ -255,7 +269,7 @@ namespace ZeroAs.DOTS.Colliders.Jobs
             var groupData = toArrayManager.EnsureJobData(groupIndex);
         
             // 创建结果队列
-            resultsQueue = new NativeQueue<int>(allocator);
+            var resultsQueue = new NativeQueue<int>(Allocator.TempJob);
         
             // 准备Job参数
             var job = new SingleToManyCollisionJob
@@ -268,36 +282,49 @@ namespace ZeroAs.DOTS.Colliders.Jobs
             };
             int totalLen = toArrayManager._collisionGroupObjs[groupIndex].checkGroup.Count;
             // 调度并行任务
-            waitHandle = job.ScheduleParallel(
+            var dep = job.ScheduleParallel(
                 totalLen, 
                 batchSingleCount,//nextPow2(totalLen/32+1), 
                 groupData.handle);
-        }
-
-        [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
-        public static void PostProcessAllResults(
-            out NativeArray<int> resArray,
-            ref NativeQueue<int> resultsQueue,
-            Allocator allocator = Allocator.Temp,
-            bool sort = true)
-        {
-            // 转换队列为数组
-            NativeArray<int> resultArray = resultsQueue.ToArray(allocator);
-            resultsQueue.Dispose();
-
-            // 排序（可选）
-            if (sort && resultArray.Length > 1)
-            {
-                resultArray.Sort();
-            }
-
-            resArray = resultArray;
+            var sortJob = new ConvertQueueToArrayThenSort();
+            sortJob.ele = resultsQueue;
+            resultArray= sortJob.res = new NativeList<int>(allocator);
+            var sortJobHandle = sortJob.Schedule(dep);
+            waitHandle = sortJobHandle;
+            //等待waitHandle完成后销毁
+            resultsQueue.Dispose(waitHandle);
         }
         
 
         #endregion
     }
-
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
+    struct ConvertQueueToArrayThenSort : IJob
+    {
+        [ReadOnly] public NativeQueue<int> ele;
+        public NativeList<int> res;
+        public void Execute()
+        {
+            res.AddRange(ele.ToArray(Allocator.Temp));
+            res.Sort();
+        }
+    }
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance)]
+    struct CombineMinJob : IJob
+    {
+        [DeallocateOnJobCompletion, ReadOnly] public NativeArray<int> ele;
+        [WriteOnly]public NativeReference<int> min;
+        public void Execute()
+        {
+            var res = int.MaxValue;
+            int len = ele.Length;
+            for (int i = 0; i < len; i++)
+            {
+                res = math.min(res, ele[i]);
+            }
+            min.Value = res;
+        }
+    }
     [BurstCompile]
     public struct ConvertCheckGroupToArrayJob : IJob
     {

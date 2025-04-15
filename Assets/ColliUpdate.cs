@@ -12,21 +12,26 @@ namespace DefaultNamespace
             CollisionManager.instance = new CollisionManager();
         }
 
-        private void Update()
+        private void Update2()
         {
             CollisionManager.instance.ReloadJobCollisionChecker();
             CollisionManager.instance.TraverseAllListener();
-            if (
+            /*if (
                 CollisionManager.instance.converterManager.IsCreated)
             {
                 
                 CollisionManager.instance.converterManager.Dispose();
-            }
+            }*/
+        }
+        private void Update()
+        {
+            Update2();
+            Update2();
         }
 
         private void LateUpdate()
         {
-            CollisionManager.instance.nativeCollisionManager.CompactVertexBuffers();
+            //CollisionManager.instance.nativeCollisionManager.CompactVertexBuffers();
         }
 
         private void OnPostRender()

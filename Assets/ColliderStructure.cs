@@ -8,6 +8,7 @@ using TrueSync;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace ZeroAs.DOTS.Colliders
@@ -470,6 +471,13 @@ namespace ZeroAs.DOTS.Colliders
         public NativeArray<NativeHashSet<int>> groupedColliders;
         public NativeList<TSVector2> vertices = new NativeList<TSVector2>(Allocator.Persistent);
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ColliderStructure GetColliderStructureSafe(in ColliderBase collider)
+        {
+            collider.CheckDirty();
+            colliders.TryGetValue(collider.collider.uniqueID,out var res);
+            return res;
+        }
         void InitGroupedStructs()
         {
             groupedColliders = new NativeArray<NativeHashSet<int>>(CollisionManager.groupCnt,Allocator.Persistent);
@@ -918,8 +926,14 @@ namespace ZeroAs.DOTS.Colliders
         }
     }
     [BurstCompile(DisableDirectCall = true,OptimizeFor = OptimizeFor.Performance)]
-    public struct CollisionManagerBurst
+    public struct GroupedResultReceiver<T>:IDisposable where T:unmanaged,IDisposable
     {
-        
+        public T Container;
+        public int ActionTarget;
+        [BurstCompile(DisableDirectCall = true, OptimizeFor = OptimizeFor.Performance)]
+        public void Dispose()
+        {
+            Container.Dispose();
+        }
     }
 }
